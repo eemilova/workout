@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>🐼 Panda Workout Tracker</title>
+<meta name="robots" content="noindex, nofollow">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
+<style>
+  :root{--bg:#f5f7fb;--card:#ffffff;--accent:#2b8cff;--muted:#666}
+  body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;margin:0;background:var(--bg);display:flex;justify-content:center;padding:18px}
+  .app{width:100%;max-width:720px}
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  h1{font-size:20px;margin:0}
+  .card{background:var(--card);padding:14px;border-radius:12px;box-shadow:0 6px 20px rgba(20,30,60,0.06);margin-bottom:12px}
+  label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+  select,input{padding:10px;border-radius:8px;border:1px solid #d7dbe6;font-size:15px;width:100%;box-sizing:border-box}
+  .row{display:flex;gap:10px}
+  .half{flex:1}
+  .controls{display:flex;gap:10px;align-items:center;margin-top:10px}
+  .big-btn{background:var(--accent);color:#fff;padding:12px 16px;border-radius:10px;border:none;font-weight:700;cursor:pointer}
+  .muted-btn{background:#eef3ff;color:var(--accent);padding:10px;border-radius:10px;border:none;cursor:pointer}
+  .exercise-block{padding:10px;border-radius:8px;border:1px solid #eef2ff;margin-bottom:8px}
+  .sets{margin-top:8px}
+  .set-line{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed #eee}
+  .small{font-size:13px;color:var(--muted)}
+  .danger{background:#ff6b6b;color:#fff;border:none;padding:6px 8px;border-radius:8px;cursor:pointer}
+  .edit{background:#ffd770;color:#222;border:none;padding:6px 8px;border-radius:8px;cursor:pointer}
+  .export-btn{background:#00b894;color:#fff;padding:10px;border-radius:8px;border:none;cursor:pointer}
+  @media(max-width:520px){.row{flex-direction:column}.controls{flex-direction:column}}
+</style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>🐼 Panda Workout Tracker</h1>
+      <div class="small">Offline • Single‑user</div>
+    </header>
+
+    <!-- Controls -->
+    <section class="card" id="inputCard">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label for="muscleSelect">Muscle group</label>
+          <select id="muscleSelect"><option value="">-- choose --</option></select>
+        </div>
+        <div>
+          <label for="exerciseSelect">Exercise</label>
+          <select id="exerciseSelect"><option value="">-- choose --</option></select>
+        </div>
+      </div>
+
+      <div style="margin-top:10px">
+        <label for="customExercise">Or custom exercise</label>
+        <input id="customExercise" placeholder="e.g. Low cable crossover" />
+      </div>
+
+      <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <div style="min-width:180px">
+          <label for="measurementType">Measurement</label>
+          <select id="measurementType"><option value="reps">Reps & Weight</option><option value="duration">Duration (min)</option></select>
+        </div>
+
+        <div class="row" style="flex:1;min-width:220px">
+          <div class="half">
+            <label class="small">Reps</label>
+            <input id="repsInput" type="number" min="1" step="1" placeholder="e.g. 8" />
+          </div>
+          <div class="half">
+            <label class="small">Weight (kg)</label>
+            <input id="weightInput" type="number" step="0.1" placeholder="e.g. 47.5" />
+          </div>
+        </div>
+
+        <div style="min-width:160px">
+          <label class="small">Duration (min)</label>
+          <input id="durationInput" type="number" step="0.1" placeholder="e.g. 3" style="display:none" />
+        </div>
+      </div>
+
+      <div class="controls">
+        <button id="addSetBtn" class="big-btn">+ Add Set</button>
+        <button id="saveDayBtn" class="muted-btn">Save Today</button>
+        <button id="viewHistoryBtn" class="muted-btn">View History & Chart</button>
+        <button id="exportCsvBtn" class="export-btn">Export CSV</button>
+      </div>
+    </section>
+
+    <!-- Today's workout -->
+    <section class="card" id="todayCard">
+      <h3 style="margin:0 0 8px 0">Today's Workout</h3>
+      <div id="workoutArea"><div class="small">No sets added yet.</div></div>
+    </section>
+
+    <!-- History -->
+    <section class="card" id="historyCard">
+      <h3 style="margin:0 0 8px 0">History</h3>
+      <div id="historyArea"><div class="small">No saved workouts yet. Click Save Today to store.</div></div>
+    </section>
+
+    <!-- Chart area -->
+    <section class="card" id="chartCard" style="display:none">
+      <h3 style="margin:0 0 8px 0">Chart — Total volume & duration per day</h3>
+      <canvas id="chartCanvas" height="140"></canvas>
+    </section>
+  </div>
+
+<script>
+// ---------- Data model & storage key ----------
+const STORAGE_KEY = 'workout_history_v1';
+let history = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+let todayWorkout = [];
+let chartInstance = null;
+
+// ---------- Exercises (grouped) ----------
+const exercises = {
+  chest: { free:["Bench Press","Dumbbell Fly","Push-ups","Incline Dumbbell Press"], cable:["Cable Chest Fly","Cable Crossover"], smith:["Smith Machine Bench Press"] },
+  back: { free:["Barbell Row","Single Arm Dumbbell Row","Pull-ups"], cable:["Cable Row","Straight-arm Pulldown"], smith:["Smith Machine Shrugs","Smith Upright Row"] },
+  legs: { free:["Squat","Lunges","Romanian Deadlift"], cable:["Cable Kickback"], smith:["Leg Press","Smith Machine Squat"] },
+  shoulders: { free:["Overhead Press","Arnold Press","Lateral Raise"], cable:["Cable Lateral Raise","Face Pull"], smith:["Smith Machine Overhead Press"] },
+  arms: { free:["Barbell Curl","Hammer Curl","Skullcrushers"], cable:["Cable Curl","Tricep Pushdown"], smith:["Smith Machine Tricep Press"] },
+  core: { bodyweight:["Plank","Side Plank","Sit-ups","Mountain Climbers"], cable:["Cable Crunch"], equipment:["Hanging Leg Raise","Ab Wheel Rollout"] }
+};
+
+// ---------- DOM references ----------
+const muscleSelect = document.getElementById('muscleSelect');
+const exerciseSelect = document.getElementById('exerciseSelect');
+const customExercise = document.getElementById('customExercise');
+const measurementType = document.getElementById('measurementType');
+const repsInput = document.getElementById('repsInput');
+const weightInput = document.getElementById('weightInput');
+const durationInput = document.getElementById('durationInput');
+const addSetBtn = document.getElementById('addSetBtn');
+const workoutArea = document.getElementById('workoutArea');
+const historyArea = document.getElementById('historyArea');
+const saveDayBtn = document.getElementById('saveDayBtn');
+const viewHistoryBtn = document.getElementById('viewHistoryBtn');
+const chartCard = document.getElementById('chartCard');
+const exportCsvBtn = document.getElementById('exportCsvBtn');
+
+// ---------- Initialization (populate muscle list) ----------
+function init() {
+  // populate muscle groups
+  for (const key of Object.keys(exercises)){
+    const opt = document.createElement('option'); opt.value = key; opt.textContent = key.toUpperCase();
+    muscleSelect.appendChild(opt);
+  }
+
+  // when muscle changes, populate exercise select using optgroups
+  muscleSelect.addEventListener('change', ()=>{
+    // clear previous options
+    exerciseSelect.innerHTML = '';
+    const placeholder = document.createElement('option'); placeholder.value=''; placeholder.textContent='-- choose --'; exerciseSelect.appendChild(placeholder);
+
+    const group = exercises[muscleSelect.value] || {};
+    for (const type of Object.keys(group)){
+      const optGroup = document.createElement('optgroup'); optGroup.label = capitalize(type);
+      for (const ex of group[type]){
+        const o = document.createElement('option'); o.value = ex; o.textContent = ex; optGroup.appendChild(o);
+      }
+      exerciseSelect.appendChild(optGroup);
+    }
+  });
+
+  // measurement toggle
+  measurementType.addEventListener('change', ()=>{
+    if (measurementType.value === 'reps'){
+      repsInput.style.display='inline-block'; weightInput.style.display='inline-block'; durationInput.style.display='none';
+    } else {
+      repsInput.style.display='none'; weightInput.style.display='none'; durationInput.style.display='inline-block';
+    }
+  });
+
+  // wire buttons
+  addSetBtn.addEventListener('click', handleAddSet);
+  saveDayBtn.addEventListener('click', saveToday);
+  viewHistoryBtn.addEventListener('click', renderHistoryAndChart);
+  exportCsvBtn.addEventListener('click', exportHistoryCSV);
+
+  // initial render
+  renderWorkout();
+  renderHistoryArea();
+}
+
+// ---------- Helpers ----------
+function capitalize(s){return s.charAt(0).toUpperCase()+s.slice(1)}
+function parseDecimal(s){ if (s===undefined||s===null) return NaN; return parseFloat(String(s).replace(',','.').trim()); }
+
+// ---------- Add / render today's workout ----------
+function handleAddSet(){
+  const exName = (customExercise.value || '').trim() || exerciseSelect.value;
+  if (!exName){ alert('Please select or enter an exercise'); return; }
+  if (measurementType.value === 'reps'){
+    const reps = parseInt(repsInput.value,10);
+    const weight = parseDecimal(weightInput.value);
+    if (!reps || isNaN(weight)) { alert('Fill reps and weight (weight can be decimal)'); return; }
+    addSetToToday(exName, { type:'reps', reps, weight });
+  } else {
+    const duration = parseDecimal(durationInput.value);
+    if (!duration || isNaN(duration)) { alert('Fill duration in minutes'); return; }
+    addSetToToday(exName, { type:'duration', duration });
+  }
+  // clear small inputs but keep selected muscle/exercise for convenience
+  repsInput.value=''; weightInput.value=''; durationInput.value=''; customExercise.value='';
+  renderWorkout();
+}
+
+function addSetToToday(exName, set){
+  let entry = todayWorkout.find(e => e.name === exName);
+  if (!entry){ entry = { name: exName, sets: [] }; todayWorkout.push(entry); }
+  entry.sets.push(set);
+}
+
+function renderWorkout(){
+  workoutArea.innerHTML='';
+  if (todayWorkout.length === 0){ workoutArea.innerHTML = '<div class="small">No sets added yet.</div>'; return; }
+  for (let i=0;i<todayWorkout.length;i++){
+    const ex = todayWorkout[i];
+    const wrapper = document.createElement('div'); wrapper.className='exercise-block';
+    const title = document.createElement('div'); title.innerHTML = `<strong>${ex.name}</strong>`; wrapper.appendChild(title);
+    const setsDiv = document.createElement('div'); setsDiv.className='sets';
+    ex.sets.forEach((s,si)=>{
+      const line = document.createElement('div'); line.className='set-line';
+      const left = document.createElement('div'); left.className='small';
+      left.textContent = s.type === 'reps' ? `${s.reps} reps @ ${s.weight} kg` : `${s.duration} min`;
+      const right = document.createElement('div');
+      const editBtn = document.createElement('button'); editBtn.className='edit'; editBtn.textContent='Edit'; editBtn.onclick = ()=>{ editSet(i,si); };
+      const delBtn = document.createElement('button'); delBtn.className='danger'; delBtn.textContent='Delete'; delBtn.onclick = ()=>{ deleteSet(i,si); };
+      right.appendChild(editBtn); right.appendChild(delBtn);
+      line.appendChild(left); line.appendChild(right);
+      setsDiv.appendChild(line);
+    });
+    wrapper.appendChild(setsDiv);
+    workoutArea.appendChild(wrapper);
+  }
+}
+
+function editSet(i,si){
+  const s = todayWorkout[i].sets[si];
+  if (s.type === 'reps'){
+    const nr = parseInt(prompt('New reps', s.reps),10);
+    const nw = parseDecimal(prompt('New weight (kg)', s.weight));
+    if (!isNaN(nr) && !isNaN(nw)){ s.reps = nr; s.weight = nw; }
+  } else {
+    const nd = parseDecimal(prompt('New duration (min)', s.duration));
+    if (!isNaN(nd)) s.duration = nd;
+  }
+  renderWorkout();
+}
+function deleteSet(i,si){ todayWorkout[i].sets.splice(si,1); if (todayWorkout[i].sets.length===0) todayWorkout.splice(i,1); renderWorkout(); }
+
+// ---------- Save / history ----------
+function saveToday(){
+  if (todayWorkout.length===0){ alert('No sets to save for today.'); return; }
+  const date = (new Date()).toISOString().split('T')[0];
+  history.push({ date, workout: JSON.parse(JSON.stringify(todayWorkout)) });
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+  todayWorkout = [];
+  renderWorkout(); renderHistoryArea();
+  alert('Saved ' + date);
+}
+
+function renderHistoryArea(){
+  historyArea.innerHTML='';
+  if (!history.length){ historyArea.innerHTML = '<div class="small">No saved workouts yet.</div>'; return; }
+  for (let i=0;i<history.length;i++){
+    const h = history[i];
+    const block = document.createElement('div'); block.className='workout-block';
+    const head = document.createElement('div'); head.innerHTML = `<strong>${h.date}</strong> `;
+    const del = document.createElement('button'); del.className='danger'; del.textContent='Delete'; del.style.float='right'; del.onclick = ()=>{ if(confirm('Delete this workout?')){ history.splice(i,1); localStorage.setItem(STORAGE_KEY, JSON.stringify(history)); renderHistoryArea(); } };
+    head.appendChild(del);
+    block.appendChild(head);
+    h.workout.forEach(ex=>{
+      const exEl = document.createElement('div'); exEl.className='history-exercise';
+      exEl.innerHTML = `<b>${ex.name}</b>: ` + ex.sets.map(s => s.type==='reps' ? `${s.reps}x${s.weight}` : `${s.duration} min`).join(', ');
+      block.appendChild(exEl);
+    });
+    historyArea.appendChild(block);
+  }
+}
+
+// ---------- Chart rendering (option A: per-day totals) ----------
+function renderHistoryAndChart(){
+  renderHistoryArea();
+  // prepare chart data
+  const labels = history.map(h => h.date);
+  const volume = history.map(h => h.workout.reduce((sum,ex) => sum + ex.sets.filter(s=>s.type==='reps').reduce((a,b)=>a + (b.reps * b.weight),0), 0));
+  const duration = history.map(h => h.workout.reduce((sum,ex) => sum + ex.sets.filter(s=>s.type==='duration').reduce((a,b)=>a + b.duration,0), 0));
+
+  chartCard.style.display = 'block';
+  const ctx = document.getElementById('chartCanvas').getContext('2d');
+  if (chartInstance) chartInstance.destroy();
+  chartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Total Volume (kg)', data: volume, backgroundColor: 'rgba(54,162,235,0.8)' },
+        { label: 'Total Duration (min)', data: duration, backgroundColor: 'rgba(255,99,132,0.8)' }
+      ]
+    },
+    options: { responsive:true, plugins:{legend:{position:'top'}}, scales:{y:{beginAtZero:true}} }
+  });
+}
+
+// ---------- CSV export ----------
+function exportHistoryCSV(){
+  if (!history.length){ alert('No history to export'); return; }
+  // CSV header
+  let csv = 'date,exercise,type,reps,weight,duration\n';
+  for (const day of history){
+    for (const ex of day.workout){
+      for (const s of ex.sets){
+        const row = [
+          day.date,
+          '"' + String(ex.name).replace(/"/g,'""') + '"',
+          s.type,
+          (s.type==='reps' && s.reps) ? s.reps : '',
+          (s.type==='reps' && s.weight) ? s.weight : '',
+          (s.type==='duration' && s.duration) ? s.duration : ''
+        ];
+        csv += row.join(',') + '\n';
+      }
+    }
+  }
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'workout_history.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+
+// ---------- start ----------
+init();
+renderHistoryArea();
+</script>
+</body>
+</html>
